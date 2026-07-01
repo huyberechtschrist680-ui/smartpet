@@ -174,9 +174,8 @@ export default function Home() {
     <main className="page">
       <section className="hero">
         <div>
-          <p className="eyebrow">ESP32 主动轮询 · Vercel API</p>
+          <p className="eyebrow">Vercel API部署</p>
           <h1>SmartPet 远程操控台</h1>
-          <p className="subtitle">网站只保存状态和待执行命令，不主动连接 ESP32。</p>
         </div>
         <button className="secondary" onClick={refresh}>刷新</button>
       </section>
@@ -192,7 +191,6 @@ export default function Home() {
             管理密码
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Vercel 环境变量 SMARTPET_ADMIN_PASSWORD" />
           </label>
-          <p className="hint">本密码只用于网页控制台，不会下发给 ESP32。</p>
         </div>
 
         <div className="card status-card">
@@ -258,7 +256,6 @@ export default function Home() {
           <code>GET {apiBase}/api/smartpet/command?device={device || "smartpet-01"}</code>
           <code>POST {apiBase}/api/smartpet/ack</code>
         </div>
-        <p className="hint">ESP32 请求头使用 Content-Type: application/json 和 Authorization: Bearer &lt;token&gt;。</p>
       </section>
 
       <section className="grid two">
