@@ -1,13 +1,12 @@
 import { NextRequest } from "next/server";
-import { defaultDeviceId, verifyDeviceAuth } from "@/lib/auth";
+import { verifyDeviceAuth } from "@/lib/auth";
+import { normalizeAckPayload, normalizeDeviceId } from "@/lib/device-payload";
 import { errorJson, okJson, readJsonBody } from "@/lib/responses";
 import { ackCommand } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const preferredRegion = "hkg1";
 export const dynamic = "force-dynamic";
-
-const allowedResults = new Set(["OK", "BAD_COMMAND", "BUSY", "IGNORED_SLEEPING", "HTTP_ERROR"]);
 
 export async function POST(req: NextRequest) {
   const auth = verifyDeviceAuth(req);
@@ -20,24 +19,13 @@ export async function POST(req: NextRequest) {
     return errorJson(error instanceof Error ? error.message : "BAD_JSON", 400);
   }
 
-  if (!body || typeof body !== "object") return errorJson("BAD_BODY", 400);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return errorJson("BAD_BODY", 400);
   const data = body as Record<string, unknown>;
+  const device = normalizeDeviceId(data.device);
+  const result = normalizeAckPayload(device, data);
 
-  const device = typeof data.device === "string" && data.device.trim() ? data.device.trim() : defaultDeviceId();
-  const id = typeof data.id === "string" ? data.id.trim() : "";
-  const command = typeof data.command === "string" ? data.command.trim().slice(0, 80) : "";
-  const result = typeof data.result === "string" ? data.result.trim() : "";
+  if (!result.ok) return errorJson(result.error, 400);
 
-  if (!result || !allowedResults.has(result)) {
-    return errorJson("BAD_RESULT", 400);
-  }
-
-  await ackCommand({
-    device,
-    id: id || undefined,
-    command: command || undefined,
-    result,
-  });
-
+  await ackCommand(result.ack);
   return okJson({ ok: true });
 }

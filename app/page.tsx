@@ -252,9 +252,9 @@ export default function Home() {
       <section className="card">
         <h2>ESP32 API</h2>
         <div className="api-grid">
-          <code>POST {apiBase}/api/smartpet/status</code>
-          <code>GET {apiBase}/api/smartpet/command?device={device || "smartpet-01"}</code>
-          <code>POST {apiBase}/api/smartpet/ack</code>
+          <code>POST {apiBase}/api/smartpet/sync</code>
+          <code>{"Authorization: Bearer <SMARTPET_API_TOKEN>"}</code>
+          <code>{`{"device":"${device || "smartpet-01"}","heartbeat":true,"mode":"website","uptime_ms":123456,"status":{"power":"NORMAL","emotion":5,"food":"HUNGRY","remain":0,"motion":"NULL"},"ack":null}`}</code>
         </div>
       </section>
 

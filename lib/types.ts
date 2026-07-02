@@ -5,6 +5,7 @@ export type AckResult = "OK" | "BAD_COMMAND" | "BUSY" | "IGNORED_SLEEPING" | "HT
 
 export interface SmartPetStatus {
   device: string;
+  heartbeat?: boolean;
   mode?: "website" | "ble" | string;
   power?: DevicePower;
   emotion?: number;
@@ -37,6 +38,7 @@ export interface DashboardSnapshot {
   ok: true;
   device: string;
   online: boolean;
+  online_timeout_ms: number;
   status: SmartPetStatus | null;
   pending: PendingCommand | null;
   last_ack: AckRecord | null;

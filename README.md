@@ -3,9 +3,7 @@
 这是一个用于 ESP32-S3 智能桌宠的远程操控网站。通信模型完全采用“ESP32 主动访问网站”的方式：
 
 ```text
-ESP32 -> 网站：POST /api/smartpet/status 上报状态
-ESP32 -> 网站：GET  /api/smartpet/command 拉取一条待执行命令
-ESP32 -> 网站：POST /api/smartpet/ack 回报命令执行结果
+ESP32 -> 网站：POST /api/smartpet/sync 同时完成心跳、状态上报、ACK 回传和拉取命令
 ```
 
 网站不会尝试主动连接 ESP32，因此适合校园网、宿舍 Wi-Fi、手机热点等没有公网 IP 的环境。
@@ -14,15 +12,14 @@ ESP32 -> 网站：POST /api/smartpet/ack 回报命令执行结果
 
 - 网页控制台显示桌宠最新状态。
 - 网页点击按钮生成一条待执行命令。
-- ESP32 定时短轮询 `/api/smartpet/command` 取走命令。
-- ESP32 执行后调用 `/api/smartpet/ack` 回报结果。
-- ESP32 周期性调用 `/api/smartpet/status` 上报状态。
+- ESP32 每 1500 到 2000ms 调用 `/api/smartpet/sync`。
+- 一次 `/sync` 同时完成心跳、状态上报、ACK 回传和命令拉取。
 - 支持 `Authorization: Bearer <token>` 形式的设备鉴权。
 - 使用 Upstash Redis 持久化状态和命令；未配置 Upstash 时提供本地内存回退，仅用于开发调试。
 
 ## 2. ESP32-facing API
 
-### POST /api/smartpet/status
+### POST /api/smartpet/sync
 
 请求头：
 
@@ -31,39 +28,56 @@ Content-Type: application/json
 Authorization: Bearer your-token
 ```
 
-请求体：
+无 ACK 时请求体：
 
 ```json
 {
   "device": "smartpet-01",
+  "heartbeat": true,
   "mode": "website",
-  "power": "NORMAL",
-  "emotion": 5,
-  "food": "HUNGRY",
-  "remain": 0,
-  "motion": "NULL",
-  "uptime_ms": 123456
+  "uptime_ms": 123456,
+  "status": {
+    "power": "NORMAL",
+    "emotion": 5,
+    "food": "HUNGRY",
+    "remain": 0,
+    "motion": "NULL"
+  },
+  "ack": null
 }
 ```
 
-响应：
+刚执行过命令时，请在同一次 `/sync` 请求里带 ACK：
 
 ```json
-{ "ok": true }
-```
-
-### GET /api/smartpet/command?device=smartpet-01
-
-请求头：
-
-```http
-Authorization: Bearer your-token
+{
+  "device": "smartpet-01",
+  "heartbeat": true,
+  "mode": "website",
+  "uptime_ms": 123456,
+  "status": {
+    "power": "NORMAL",
+    "emotion": 6,
+    "food": "FULL",
+    "remain": 118,
+    "motion": "FOWD"
+  },
+  "ack": {
+    "id": "cmd-001",
+    "command": "setmot 4",
+    "result": "OK"
+  }
+}
 ```
 
 没有命令：
 
 ```json
-{ "ok": true, "command": "" }
+{
+  "ok": true,
+  "online": true,
+  "command": null
+}
 ```
 
 有命令：
@@ -71,55 +85,21 @@ Authorization: Bearer your-token
 ```json
 {
   "ok": true,
-  "id": "cmd-1001",
-  "command": "setmot 4"
+  "online": true,
+  "command": {
+    "id": "cmd-002",
+    "text": "touch"
+  }
 }
 ```
 
 特点：
 
 - 一次最多返回一条命令。
-- 不返回数组。
-- 命令不超过 80 字节。
-- 命令被 GET 下发后会进入 DELIVERED 状态。
-- 如果 10 秒内没有 ack，允许再次下发；该时间可由 `SMARTPET_COMMAND_REDELIVER_MS` 配置。
-
-### POST /api/smartpet/ack
-
-请求头：
-
-```http
-Content-Type: application/json
-Authorization: Bearer your-token
-```
-
-请求体：
-
-```json
-{
-  "device": "smartpet-01",
-  "id": "cmd-1001",
-  "command": "setmot 4",
-  "result": "OK"
-}
-```
-
-支持的 result：
-
-```text
-OK
-BAD_COMMAND
-BUSY
-IGNORED_SLEEPING
-HTTP_ERROR
-```
-
-响应：
-
-```json
-{ "ok": true }
-```
-
+- 新响应统一使用 `command.text` 表示短文本命令。
+- 服务端收到合法 `/sync` 后会刷新在线时间。
+- 后台默认 10 秒未收到合法同步则判定离线，并且阈值不会低于 8 秒。
+- 旧 `/status`、`/command`、`/ack` 设备接口仍保留用于兼容旧固件。
 ## 3. Dashboard-only API
 
 网页控制台还使用了几个后台接口：
@@ -157,6 +137,7 @@ SMARTPET_API_TOKEN=your-device-token
 SMARTPET_ADMIN_PASSWORD=your-admin-password
 SMARTPET_DEFAULT_DEVICE=smartpet-01
 NEXT_PUBLIC_DEFAULT_DEVICE=smartpet-01
+SMARTPET_ONLINE_TIMEOUT_MS=10000
 UPSTASH_REDIS_REST_URL=your-upstash-rest-url
 UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
 SMARTPET_COMMAND_REDELIVER_MS=10000
@@ -187,43 +168,24 @@ SMARTPET_COMMAND_REDELIVER_MS=10000
 
 ## 7. ESP32 请求示例
 
-### 拉取命令
+### 同步心跳、状态、ACK 和命令
 
 ```cpp
 HTTPClient http;
-http.begin("https://pet.example.com/api/smartpet/command?device=smartpet-01");
-http.addHeader("Authorization", "Bearer your-token");
-int code = http.GET();
-```
-
-### 上报状态
-
-```cpp
-HTTPClient http;
-http.begin("https://pet.example.com/api/smartpet/status");
+http.begin("https://pet.example.com/api/smartpet/sync");
 http.addHeader("Content-Type", "application/json");
 http.addHeader("Authorization", "Bearer your-token");
 int code = http.POST(jsonBody);
 ```
 
-### 确认命令
-
-```cpp
-HTTPClient http;
-http.begin("https://pet.example.com/api/smartpet/ack");
-http.addHeader("Content-Type", "application/json");
-http.addHeader("Authorization", "Bearer your-token");
-int code = http.POST(jsonBody);
-```
-
+无待回传 ACK 时，`jsonBody` 中使用 `"ack":null`。执行过网站命令后，下一次同步请求把 `id`、`command`、`result` 放入 `ack`。
 ## 8. 建议轮询频率
 
 ```text
-拉取命令：每 1 到 2 秒一次
-状态上报：每 3 到 5 秒一次
-关键事件：立即上报一次
-请求超时：1000 到 2000 ms
+POST /api/smartpet/sync：每 1500 到 2000 ms 一次
+HTTP 超时：1000 到 2000 ms
 失败重试：逐步退避到 10 到 30 秒
+离线阈值：推荐 8 到 10 秒，不要设为 2 到 3 秒
 ```
 
 ## 9. 命令白名单

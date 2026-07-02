@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { defaultDeviceId, verifyAdminPassword } from "@/lib/auth";
+import { onlineTimeoutMs } from "@/lib/device-payload";
 import { errorJson, okJson } from "@/lib/responses";
 import { getEvents, getLastAck, getPendingCommand, getStatus, storageKind } from "@/lib/store";
 
@@ -20,12 +21,14 @@ export async function GET(req: NextRequest) {
   ]);
 
   const now = Date.now();
-  const online = Boolean(status && now - status.received_at <= 15000);
+  const timeoutMs = onlineTimeoutMs();
+  const online = Boolean(status && now - status.received_at <= timeoutMs);
 
   return okJson({
     ok: true,
     device,
     online,
+    online_timeout_ms: timeoutMs,
     status,
     pending,
     last_ack: lastAck,
